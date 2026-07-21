@@ -1,0 +1,766 @@
+{
+  "name": "Main",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "research",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -320,
+        -224
+      ],
+      "id": "a69d2f3b-4a55-4446-8292-1fde98e082bc",
+      "name": "Webhook",
+      "webhookId": "f90f2aa1-f265-496c-93b4-7cbdb4a38434"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT \n  c.id,\n  c.website,\n  c.company_name,\n  c.report_json\nFROM companies c\nWHERE c.website = '{{ $json.website }}' \nAND c.created_at > NOW() - INTERVAL '7 days'\nLIMIT 1;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        128,
+        -224
+      ],
+      "id": "9be694ff-5229-440b-96e1-496b501324a9",
+      "name": "Check Cache",
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "Your_Postgres_Database_ID",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.tavily.com/search",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer YOUR_TAVILY_API_KEY_HERE"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"query\": \"{{ $json.domain }} company products services target audience business model\",\n  \"search_depth\": \"advanced\",\n  \"max_results\": 5,\n  \"include_answer\": true\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1024,
+        -128
+      ],
+      "id": "31bc68e1-c029-4b5f-aaae-9557872d82dc",
+      "name": "Tavily Research",
+      "retryOnFail": false,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "7bf1807b-31bd-441a-9d44-a4e2c200c195",
+              "leftValue": "={{ $json.id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "number",
+                "operation": "exists",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        352,
+        -224
+      ],
+      "id": "08833801-97f6-408a-b13b-ba0ea0ce5f47",
+      "name": "Cache Found?"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=YOUR_GEMINI_API_KEY_HERE",
+        "sendHeaders": true,
+        "specifyHeaders": "=keypair",
+        "headerParameters": {
+          "parameters": [
+            {}
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"contents\": [\n    {\n      \"parts\": [\n        {\n          \"text\": {{ JSON.stringify($json.prompt) }}\n        }\n      ]\n    }\n  ]\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1472,
+        -128
+      ],
+      "id": "68b8be9a-268d-4a1b-87eb-4b8d15d56bce",
+      "name": "Gemini Analysis",
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $input.first().json.body;\nconst website = body.website;\n\nif (!website) {\n  throw new Error(\"No website provided\");\n}\n\n// Clean the URL\nlet cleaned = website.toLowerCase().trim();\ncleaned = cleaned.replace(/^https?:\\/\\//, '');\ncleaned = cleaned.replace(/^www\\./, '');\ncleaned = cleaned.replace(/\\/$/, '');\n\nconst fullUrl = 'https://' + cleaned;\n\nreturn [{\n  json: {\n    website: fullUrl,\n    domain: cleaned\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -96,
+        -224
+      ],
+      "id": "61c53b7b-7355-440f-9d57-0c3180885221",
+      "name": "Clean URL"
+    },
+    {
+      "parameters": {
+        "jsCode": "const tavilyData = $input.first().json;\nconst domain = $('Clean URL').item.json.domain;\n\n// Get website text from crawler (if available)\nlet websiteText = '';\ntry {\n  websiteText = $('Extract Website Text').item.json.website_text || '';\n} catch (e) {\n  websiteText = '';\n}\n\n// Extract Tavily research\nconst answer = tavilyData.answer || '';\nconst results = (tavilyData.results || []).map(r => \n  `Title: ${r.title}\\nContent: ${r.content}`\n).join('\\n\\n');\n\nconst tavilyText = `TAVILY ANSWER: ${answer}\\n\\nTAVILY SOURCES:\\n${results}`;\n\n// Build full research context\nconst researchText = websiteText \n  ? `===== COMPANY WEBSITE =====\\n${websiteText}\\n\\n===== WEB RESEARCH =====\\n${tavilyText}`\n  : tavilyText;\n\nconst prompt = `You are a senior SDR analyst. Analyze the following company research and return ONLY valid JSON (no markdown, no code fences).\n\nCOMPANY DOMAIN: ${domain}\n\nRESEARCH DATA:\n${researchText}\n\nIMPORTANT: If website content is present, prioritize it for company name, products, and positioning. Use web research for validation and external context (news, funding, customers).\n\nReturn this exact JSON structure:\n{\n  \"company_name\": \"...\",\n  \"industry\": \"...\",\n  \"business_model\": \"...\",\n  \"products\": [\"...\"],\n  \"ideal_customers\": [\"...\"],\n  \"pain_points\": [\"...\"],\n  \"competitive_advantages\": [\"...\"],\n  \"recommended_persona\": \"...\",\n  \"outreach_angle\": \"...\",\n  \"discovery_questions\": [\"...\", \"...\", \"...\"],\n  \"confidence_score\": 85\n}`;\n\nreturn [{\n  json: {\n    prompt: prompt,\n    domain: domain\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1248,
+        -128
+      ],
+      "id": "8cd03e5f-1790-409e-9638-489e28fba2a2",
+      "name": "Prepare Prompt"
+    },
+    {
+      "parameters": {
+        "jsCode": "const response = $input.first().json;\nconst domain = $('Clean URL').item.json.domain;\nconst website = $('Clean URL').item.json.website;\n\n// Try Gemini format first\nlet text = response?.candidates?.[0]?.content?.parts?.[0]?.text || '';\n\n// If not Gemini, try Groq/OpenAI format\nif (!text) {\n  text = response?.choices?.[0]?.message?.content || '';\n}\n\nif (!text) {\n  throw new Error('Both Gemini and Groq returned no text');\n}\n\n// Clean markdown fences\ntext = text.trim();\ntext = text.replace(/^```json\\s*/i, '');\ntext = text.replace(/^```\\s*/i, '');\ntext = text.replace(/```\\s*$/i, '');\ntext = text.trim();\n\nlet report;\ntry {\n  report = JSON.parse(text);\n} catch (err) {\n  throw new Error('Failed to parse AI JSON: ' + err.message + '\\n\\nRaw: ' + text);\n}\n\nreturn [{\n  json: {\n    website: website,\n    domain: domain,\n    company_name: report.company_name || domain,\n    industry: report.industry || 'Unknown',\n    business_model: report.business_model || 'Unknown',\n    products: report.products || [],\n    ideal_customers: report.ideal_customers || [],\n    pain_points: report.pain_points || [],\n    competitive_advantages: report.competitive_advantages || [],\n    recommended_persona: report.recommended_persona || 'Unknown',\n    outreach_angle: report.outreach_angle || '',\n    discovery_questions: report.discovery_questions || [],\n    confidence_score: report.confidence_score || 0,\n    report_json: report\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1920,
+        -128
+      ],
+      "id": "5324f117-bdf9-4d86-a86c-0d1ee661aa79",
+      "name": "Parse AI Response"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO companies (\n  website,\n  company_name,\n  industry,\n  business_model,\n  products,\n  pain_points,\n  report_json,\n  created_at\n) VALUES (\n  '{{ $json.website }}',\n  '{{ $json.company_name.replace(/'/g, \"''\") }}',\n  '{{ $json.industry.replace(/'/g, \"''\") }}',\n  '{{ $json.business_model.replace(/'/g, \"''\") }}',\n  ARRAY[{{ $json.products.map(p => \"'\" + p.replace(/'/g, \"''\") + \"'\").join(',') }}]::TEXT[],\n  ARRAY[{{ $json.pain_points.map(p => \"'\" + p.replace(/'/g, \"''\") + \"'\").join(',') }}]::TEXT[],\n  '{{ JSON.stringify($json.report_json).replace(/'/g, \"''\") }}'::JSONB,\n  NOW()\n)\nON CONFLICT (website) \nDO UPDATE SET\n  company_name = EXCLUDED.company_name,\n  industry = EXCLUDED.industry,\n  business_model = EXCLUDED.business_model,\n  products = EXCLUDED.products,\n  pain_points = EXCLUDED.pain_points,\n  report_json = EXCLUDED.report_json,\n  created_at = NOW()\nRETURNING *;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        3488,
+        -128
+      ],
+      "id": "e74d661c-e466-451a-89b1-59915a056df3",
+      "name": "Save to Database",
+      "credentials": {
+        "postgres": {
+          "id": "wjB8YPpzKiSWPDpk",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({\n  status: \"success\",\n  cached: false,\n  company: {\n    name: $('Parse Outreach').item.json.company_name,\n    website: $('Parse Outreach').item.json.website,\n    industry: $('Parse Outreach').item.json.industry,\n    business_model: $('Parse Outreach').item.json.business_model,\n    products: $('Parse Outreach').item.json.products,\n    ideal_customers: $('Parse Outreach').item.json.ideal_customers,\n    pain_points: $('Parse Outreach').item.json.pain_points,\n    competitive_advantages: $('Parse Outreach').item.json.competitive_advantages,\n    recommended_persona: $('Parse Outreach').item.json.recommended_persona,\n    outreach_angle: $('Parse Outreach').item.json.outreach_angle,\n    discovery_questions: $('Parse Outreach').item.json.discovery_questions,\n    confidence_score: $('Parse Outreach').item.json.confidence_score\n  },\n  buying_signals: $('Parse Outreach').item.json.buying_signals || {},\n  outreach: $('Parse Outreach').item.json.outreach\n}) }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        3936,
+        -128
+      ],
+      "id": "90aeb831-0c21-4176-9540-b8d9e5c1d14a",
+      "name": "Send Response"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({\n  status: \"success\",\n  cached: true,\n  company: {\n    name: $json.company_name,\n    website: $json.website,\n    report: $json.report_json\n  }\n}) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        576,
+        -320
+      ],
+      "id": "945f481b-4eb8-4e25-90cf-2ee4f303a60f",
+      "name": "Return Cached"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.notion.com/v1/pages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer YOUR_NOTION_API_KEY_HERE"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Notion-Version",
+              "value": "2022-06-28"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  parent: { database_id: \"Your_Notion_Database_ID\" },\n  properties: {\n    \"Company Name\": {\n      title: [{ text: { content: $('Parse Outreach').item.json.company_name } }]\n    },\n    \"Website\": {\n      url: $('Parse Outreach').item.json.website\n    },\n    \"Industry\": {\n      rich_text: [{ text: { content: $('Parse Outreach').item.json.industry } }]\n    },\n    \"Business Model\": {\n      rich_text: [{ text: { content: $('Parse Outreach').item.json.business_model } }]\n    },\n    \"Persona\": {\n      rich_text: [{ text: { content: $('Parse Outreach').item.json.recommended_persona } }]\n    },\n    \"Confidence\": {\n      number: $('Parse Outreach').item.json.confidence_score\n    },\n    \"Products\": {\n      multi_select: $('Parse Outreach').item.json.products.map(p => ({ name: p.replace(/,/g, ' -').replace(/[()]/g, '').substring(0, 100) }))\n    },\n    \"Pain Points\": {\n      multi_select: $('Parse Outreach').item.json.pain_points.map(p => ({ name: p.replace(/,/g, ' -').replace(/[()]/g, '').substring(0, 100) }))\n    },\n    \"Outreach Angle\": {\n      rich_text: [{ text: { content: $('Parse Outreach').item.json.outreach_angle } }]\n    }\n  },\n  children: [\n    { object: \"block\", type: \"heading_2\", heading_2: { rich_text: [{ text: { content: \"🎯 Sales Readiness: \" + ($('Parse Outreach').item.json.buying_signals?.sales_readiness || \"UNKNOWN\") + \" (\" + ($('Parse Outreach').item.json.buying_signals?.readiness_score || 0) + \"/100)\" } }] } },\n    { object: \"block\", type: \"paragraph\", paragraph: { rich_text: [{ text: { content: $('Parse Outreach').item.json.buying_signals?.readiness_reasoning || \"\" } }] } },\n    { object: \"block\", type: \"paragraph\", paragraph: { rich_text: [{ text: { content: \"⏰ Timing: \" + ($('Parse Outreach').item.json.buying_signals?.recommended_timing || \"unknown\") } }] } },\n    { object: \"block\", type: \"divider\", divider: {} },\n    { object: \"block\", type: \"heading_2\", heading_2: { rich_text: [{ text: { content: \"🚨 Buying Signals Detected\" } }] } },\n    ...($('Parse Outreach').item.json.buying_signals?.signals || []).slice(0, 5).map(sig => ({\n      object: \"block\",\n      type: \"callout\",\n      callout: {\n        icon: { emoji: \"🎯\" },\n        rich_text: [{ text: { content: \"[\" + sig.type + \"] \" + sig.detail + \"\\n\\nWhy it matters: \" + sig.why_it_matters + \"\\n\\nOpener: \\\"\" + sig.conversation_starter + \"\\\"\" } }]\n      }\n    })),\n    { object: \"block\", type: \"divider\", divider: {} },\n    { object: \"block\", type: \"heading_2\", heading_2: { rich_text: [{ text: { content: \"📧 Cold Email\" } }] } },\n    { object: \"block\", type: \"heading_3\", heading_3: { rich_text: [{ text: { content: \"Subject: \" + ($('Parse Outreach').item.json.outreach.cold_email.subject || \"\") } }] } },\n    { object: \"block\", type: \"paragraph\", paragraph: { rich_text: [{ text: { content: $('Parse Outreach').item.json.outreach.cold_email.body || \"\" } }] } },\n    { object: \"block\", type: \"divider\", divider: {} },\n    { object: \"block\", type: \"heading_2\", heading_2: { rich_text: [{ text: { content: \"💼 LinkedIn Connection\" } }] } },\n    { object: \"block\", type: \"paragraph\", paragraph: { rich_text: [{ text: { content: $('Parse Outreach').item.json.outreach.linkedin_connection || \"\" } }] } },\n    { object: \"block\", type: \"heading_2\", heading_2: { rich_text: [{ text: { content: \"💬 LinkedIn Follow-up\" } }] } },\n    { object: \"block\", type: \"paragraph\", paragraph: { rich_text: [{ text: { content: $('Parse Outreach').item.json.outreach.linkedin_followup || \"\" } }] } },\n    { object: \"block\", type: \"divider\", divider: {} },\n    { object: \"block\", type: \"heading_2\", heading_2: { rich_text: [{ text: { content: \"📞 Call Opener\" } }] } },\n    { object: \"block\", type: \"paragraph\", paragraph: { rich_text: [{ text: { content: $('Parse Outreach').item.json.outreach.call_opener || \"\" } }] } },\n    { object: \"block\", type: \"heading_2\", heading_2: { rich_text: [{ text: { content: \"📱 Voicemail Script\" } }] } },\n    { object: \"block\", type: \"paragraph\", paragraph: { rich_text: [{ text: { content: $('Parse Outreach').item.json.outreach.voicemail_script || \"\" } }] } },\n    { object: \"block\", type: \"divider\", divider: {} },\n    { object: \"block\", type: \"heading_2\", heading_2: { rich_text: [{ text: { content: \"🎯 Discovery Questions\" } }] } },\n    ...($('Parse Outreach').item.json.discovery_questions || []).map(q => ({\n      object: \"block\",\n      type: \"bulleted_list_item\",\n      bulleted_list_item: { rich_text: [{ text: { content: q } }] }\n    }))\n  ]\n}) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        3712,
+        -128
+      ],
+      "id": "a04d9fe8-b8ce-490a-8921-13ca22d7b980",
+      "name": "Create Notion Page",
+      "retryOnFail": true,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=YOUR_GEMINI_API_KEY_HERE ",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  contents: [{\n    parts: [{\n      text: `You are Taylor, an expert SDR selling AI-driven SEO services. You have helped 560+ businesses reach Page 1 of Google using AI to find high-intent keyword gaps.\n\nGenerate personalized outreach for this company using the TEMPLATE below as your base voice and structure. Fill in the [placeholders] using the RESEARCH DATA. Rewrite naturally so it feels hand-written, NOT templated.\n\nCOMPANY RESEARCH:\nCompany: ${$('Parse Signals').item.json.company_name}\nWebsite: ${$('Parse Signals').item.json.website}\nIndustry: ${$('Parse Signals').item.json.industry}\nBusiness Model: ${$('Parse Signals').item.json.business_model}\nProducts: ${$('Parse Signals').item.json.products.join(', ')}\nIdeal Customers: ${$('Parse Signals').item.json.ideal_customers.join(', ')}\nPain Points: ${$('Parse Signals').item.json.pain_points.join(', ')}\nCompetitive Advantages: ${$('Parse Signals').item.json.competitive_advantages.join(', ')}\nRecommended Persona: ${$('Parse Signals').item.json.recommended_persona}\nOutreach Angle: ${$('Parse Signals').item.json.outreach_angle}\n\nBUYING SIGNALS DETECTED:\nSales Readiness: ${$('Parse Signals').item.json.buying_signals.sales_readiness}\nReadiness Score: ${$('Parse Signals').item.json.buying_signals.readiness_score}/100\nPriority Signal: ${$('Parse Signals').item.json.buying_signals.priority_signal || 'None'}\nSignal Details: ${JSON.stringify($('Parse Signals').item.json.buying_signals.signals).substring(0, 1500)}\nFallback Hook: ${$('Parse Signals').item.json.buying_signals.no_signal_fallback}\n\n===== EMAIL TEMPLATE (base voice) =====\nSubject: Quick question about [company]'s organic traffic\n\nHi [Name],\n\nI've been looking at [company]'s website and I absolutely love the design and how easy it is to navigate through. But your organic traffic is low which shows people are not able to find your website online.\n\nI specialize in AI-driven SEO, which allows us to build topical authority and scale content 5x faster than traditional agencies. I've helped 560+ businesses reach Page 1 by using AI to identify high-intent keyword gaps that manual audits usually miss.\n\nLet me know if you want a Free Audit Report of your website to review how you can get more high intent traffic and leads?\n\nBest,\nTaylor\n===== END TEMPLATE =====\n\nRULES:\n1. Keep Taylor's voice: friendly, direct, confident, specific numbers\n2. IF a HOT or WARM buying signal exists → open with a REFERENCE to that signal (funding, hiring, new product, etc.)\n3. IF no strong signals → use the fallback hook or website compliment\n4. Naturally tie the \"low organic traffic\" hook to their specific industry\n5. Keep the \"560+ businesses\" and \"AI-driven SEO\" credibility line\n6. Always end with the free audit offer\n7. Sign as \"Taylor\"\n8. Subject line under 60 characters\n9. Body under 150 words\n10. If signals mention specific news (funding, launch, hiring), reference it naturally\n\nReturn ONLY valid JSON (no markdown, no code fences):\n\n{\n  \"cold_email\": {\n    \"subject\": \"personalized subject under 60 chars, ideally referencing the top signal\",\n    \"body\": \"full email body with \\\\n for line breaks, signed by Taylor\"\n  },\n  \"linkedin_connection\": \"Under 300 chars. Reference their signal if applicable. Sign as Taylor.\",\n  \"linkedin_followup\": \"Sent after connection accepted. Reference organic traffic angle. Sign as Taylor.\",\n  \"call_opener\": \"First 30 seconds of a cold call. Introduce as Taylor. Reference signal if applicable.\",\n  \"voicemail_script\": \"Under 20 seconds. Reference signal if applicable. Sign as Taylor.\"\n}`\n    }]\n  }]\n}) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2816,
+        -128
+      ],
+      "id": "b4dc1b70-e102-47b7-a5dd-0a01e392cb6d",
+      "name": "Generate Outreach",
+      "retryOnFail": true,
+      "waitBetweenTries": 5000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const response = $input.first().json;\nconst previousData = $('Parse Signals').item.json;\n\n// Try Gemini format first, then Groq\nlet text = response?.candidates?.[0]?.content?.parts?.[0]?.text \n        || response?.choices?.[0]?.message?.content \n        || '';\n\nif (!text) {\n  throw new Error('Both Gemini and Groq returned no outreach text');\n}\n\ntext = text.trim();\ntext = text.replace(/^```json\\s*/i, '');\ntext = text.replace(/^```\\s*/i, '');\ntext = text.replace(/```\\s*$/i, '');\ntext = text.trim();\n\nlet outreach;\ntry {\n  outreach = JSON.parse(text);\n} catch (err) {\n  throw new Error('Failed to parse outreach JSON: ' + err.message + '\\n\\nRaw: ' + text);\n}\n\n// Fix cold_email if it's a string\nlet coldEmail = outreach.cold_email;\nif (typeof coldEmail === 'string') {\n  coldEmail = {\n    subject: \"Quick question about your organic traffic\",\n    body: coldEmail\n  };\n}\n\nreturn [{\n  json: {\n    ...previousData,\n    outreach: {\n      cold_email: coldEmail || {},\n      linkedin_connection: outreach.linkedin_connection || '',\n      linkedin_followup: outreach.linkedin_followup || '',\n      call_opener: outreach.call_opener || '',\n      voicemail_script: outreach.voicemail_script || ''\n    }\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3264,
+        -128
+      ],
+      "id": "6702cfa0-30ac-4652-9be9-831c0124ad24",
+      "name": "Parse Outreach"
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Clean URL').item.json.website }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Agent",
+              "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          },
+          "timeout": 10000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        576,
+        -128
+      ],
+      "id": "484abb5e-835d-4913-bf02-56c42623747f",
+      "name": "Fetch Homepage",
+      "retryOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $input.first().json;\nconst previousData = {\n  website: $('Clean URL').item.json.website,\n  domain: $('Clean URL').item.json.domain\n};\n\n// Handle case where fetch failed (Continue on Fail)\nlet html = '';\ntry {\n  html = input.data || input.body || '';\n  if (typeof html !== 'string') {\n    html = JSON.stringify(html);\n  }\n} catch (e) {\n  html = '';\n}\n\n// If no HTML, return empty but continue\nif (!html || html.length < 100) {\n  return [{\n    json: {\n      ...previousData,\n      website_text: '',\n      website_available: false\n    }\n  }];\n}\n\n// Remove scripts, styles, and other noise\nlet cleaned = html\n  .replace(/<script[\\s\\S]*?<\\/script>/gi, ' ')\n  .replace(/<style[\\s\\S]*?<\\/style>/gi, ' ')\n  .replace(/<noscript[\\s\\S]*?<\\/noscript>/gi, ' ')\n  .replace(/<svg[\\s\\S]*?<\\/svg>/gi, ' ')\n  .replace(/<!--[\\s\\S]*?-->/g, ' ');\n\n// Extract meta tags (often has best description)\nconst titleMatch = cleaned.match(/<title[^>]*>([^<]*)<\\/title>/i);\nconst title = titleMatch ? titleMatch[1].trim() : '';\n\nconst descMatch = cleaned.match(/<meta\\s+name=[\"']description[\"']\\s+content=[\"']([^\"']*)[\"']/i);\nconst metaDescription = descMatch ? descMatch[1].trim() : '';\n\nconst ogDescMatch = cleaned.match(/<meta\\s+property=[\"']og:description[\"']\\s+content=[\"']([^\"']*)[\"']/i);\nconst ogDescription = ogDescMatch ? ogDescMatch[1].trim() : '';\n\n// Remove all remaining HTML tags\ncleaned = cleaned.replace(/<[^>]+>/g, ' ');\n\n// Decode common HTML entities\ncleaned = cleaned\n  .replace(/&nbsp;/g, ' ')\n  .replace(/&amp;/g, '&')\n  .replace(/&lt;/g, '<')\n  .replace(/&gt;/g, '>')\n  .replace(/&quot;/g, '\"')\n  .replace(/&#39;/g, \"'\")\n  .replace(/&apos;/g, \"'\");\n\n// Collapse whitespace\ncleaned = cleaned.replace(/\\s+/g, ' ').trim();\n\n// Limit to first 5000 chars (Gemini context management)\nconst truncated = cleaned.substring(0, 5000);\n\n// Build summary\nconst websiteText = `TITLE: ${title}\nMETA DESCRIPTION: ${metaDescription}\nOG DESCRIPTION: ${ogDescription}\n\nPAGE CONTENT:\n${truncated}`;\n\nreturn [{\n  json: {\n    ...previousData,\n    website_text: websiteText,\n    website_available: true,\n    page_title: title,\n    meta_description: metaDescription\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        800,
+        -128
+      ],
+      "id": "948e4172-9667-4dce-a482-c66d6142d5ae",
+      "name": "Extract Website Text"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=YOUR_GEMINI_API_KEY_HERE ",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  contents: [{\n    parts: [{\n      text: `You are an expert SDR analyst specializing in identifying buying signals. Analyze the research below and detect signals that indicate this company is READY TO BUY.\n\nCOMPANY: ${$('Parse AI Response').item.json.company_name}\nINDUSTRY: ${$('Parse AI Response').item.json.industry}\nBUSINESS MODEL: ${$('Parse AI Response').item.json.business_model}\nPRODUCTS: ${$('Parse AI Response').item.json.products.join(', ')}\nPAIN POINTS: ${$('Parse AI Response').item.json.pain_points.join(', ')}\nCOMPETITIVE ADVANTAGES: ${$('Parse AI Response').item.json.competitive_advantages.join(', ')}\n\nFULL RESEARCH DATA:\n${JSON.stringify($('Parse AI Response').item.json.report_json)}\n\nTAVILY RESEARCH:\n${JSON.stringify($('Tavily Research').item.json).substring(0, 3000)}\n\nWEBSITE CONTENT:\n${($('Extract Website Text').item.json.website_text || '').substring(0, 2000)}\n\nDetect these signal categories:\n1. FUNDING - Recent funding round, IPO, acquisition\n2. HIRING - Hiring SDRs, marketers, sales roles, or engineers at scale\n3. GROWTH - Rapid team growth, new offices, international expansion\n4. PRODUCT - New product launches, feature releases, rebrands\n5. LEADERSHIP - New CEO/CMO/CRO/VP appointments\n6. TECHNOLOGY - Mentions of specific tech stack, competitor tools, or migrations\n7. PARTNERSHIP - New integrations, partnerships, strategic alliances\n8. AWARDS - Industry awards, recognitions, PR mentions\n9. CHALLENGES - Public pain points, complaints, scaling challenges\n10. NEWS - Any recent notable news or announcements\n\nFor each signal detected, provide:\n- The signal type\n- Specific detail from the research\n- Why it matters for sales\n- A conversation starter using that signal\n\nAlso rate overall SALES READINESS:\n- HOT: Multiple strong signals, buying urgency clear\n- WARM: Some signals, worth outreach\n- COLD: No signals, generic outreach only\n\nReturn ONLY valid JSON (no markdown, no code fences):\n\n{\n  \"sales_readiness\": \"HOT / WARM / COLD\",\n  \"readiness_score\": 0-100,\n  \"readiness_reasoning\": \"one sentence explaining the score\",\n  \"signals\": [\n    {\n      \"type\": \"FUNDING / HIRING / GROWTH / PRODUCT / LEADERSHIP / TECHNOLOGY / PARTNERSHIP / AWARDS / CHALLENGES / NEWS\",\n      \"detail\": \"specific fact from research\",\n      \"why_it_matters\": \"one sentence on sales relevance\",\n      \"conversation_starter\": \"opening line for a cold email/call using this signal\"\n    }\n  ],\n  \"priority_signal\": \"the strongest signal to lead with (from the list above)\",\n  \"recommended_timing\": \"immediate / this_week / this_month / next_quarter\",\n  \"no_signal_fallback\": \"if no signals found, provide a generic value-based hook based on their industry and pain points\"\n}`\n    }]\n  }]\n}) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2144,
+        -128
+      ],
+      "id": "38158c39-68fb-44a1-bfc5-58a4cbc334ce",
+      "name": "Detect Signals",
+      "retryOnFail": true,
+      "waitBetweenTries": 5000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const response = $input.first().json;\nconst previousData = $('Parse AI Response').item.json;\n\n// Try Gemini format first, then Groq\nlet text = response?.candidates?.[0]?.content?.parts?.[0]?.text \n        || response?.choices?.[0]?.message?.content \n        || '';\n\nlet signals = {\n  sales_readiness: \"UNKNOWN\",\n  readiness_score: 50,\n  readiness_reasoning: \"Signals detection unavailable\",\n  signals: [],\n  priority_signal: \"\",\n  recommended_timing: \"this_month\",\n  no_signal_fallback: \"Focus on value proposition and pain points\"\n};\n\nif (text) {\n  text = text.trim();\n  text = text.replace(/^```json\\s*/i, '');\n  text = text.replace(/^```\\s*/i, '');\n  text = text.replace(/```\\s*$/i, '');\n  text = text.trim();\n\n  try {\n    const parsed = JSON.parse(text);\n    signals = {\n      sales_readiness: parsed.sales_readiness || \"UNKNOWN\",\n      readiness_score: parsed.readiness_score || 50,\n      readiness_reasoning: parsed.readiness_reasoning || \"\",\n      signals: parsed.signals || [],\n      priority_signal: parsed.priority_signal || \"\",\n      recommended_timing: parsed.recommended_timing || \"this_month\",\n      no_signal_fallback: parsed.no_signal_fallback || \"\"\n    };\n  } catch (err) {\n    console.log('Failed to parse signals JSON:', err.message);\n  }\n}\n\nreturn [{\n  json: {\n    ...previousData,\n    buying_signals: signals\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2592,
+        -128
+      ],
+      "id": "870b8d23-1390-45f6-b664-c5212787a052",
+      "name": "Parse Signals"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.groq.com/openai/v1/chat/completions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer YOUR_GROQ_API_KEY_HERE"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  model: \"llama-3.3-70b-versatile\",\n  messages: [\n    {\n      role: \"user\",\n      content: $json.prompt\n    }\n  ],\n  temperature: 0.7,\n  response_format: { type: \"json_object\" }\n}) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1696,
+        -48
+      ],
+      "id": "5637518c-4cd6-410d-a5f7-eb999c03478f",
+      "name": "Groq Analysis (Backup)",
+      "retryOnFail": true,
+      "waitBetweenTries": 5000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.groq.com/openai/v1/chat/completions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer YOUR_GROQ_API_KEY_HERE"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  model: \"llama-3.3-70b-versatile\",\n  messages: [\n    {\n      role: \"system\",\n      content: \"You are a JSON generator. You MUST return a valid JSON object with ALL 5 fields: cold_email (object with subject and body), linkedin_connection (string), linkedin_followup (string), call_opener (string), voicemail_script (string). Never skip any field.\"\n    },\n    {\n      role: \"user\",\n      content: `You are Taylor, an expert SDR selling AI-driven SEO services. You have helped 560+ businesses reach Page 1 of Google.\n\nGenerate 5 personalized outreach messages for this company. All 5 fields are REQUIRED.\n\nCOMPANY: ${$('Parse Signals').item.json.company_name}\nINDUSTRY: ${$('Parse Signals').item.json.industry}\nPRODUCTS: ${$('Parse Signals').item.json.products.join(', ')}\nPAIN POINTS: ${$('Parse Signals').item.json.pain_points.join(', ')}\nPERSONA: ${$('Parse Signals').item.json.recommended_persona}\nOUTREACH ANGLE: ${$('Parse Signals').item.json.outreach_angle}\n\nBUYING SIGNAL: ${$('Parse Signals').item.json.buying_signals.priority_signal || 'None'}\nSIGNAL DETAIL: ${JSON.stringify($('Parse Signals').item.json.buying_signals.signals[0] || {}).substring(0, 500)}\n\nRULES:\n1. Reference the buying signal if HOT/WARM\n2. Keep Taylor's voice: friendly, direct, confident\n3. Always mention: \"AI-driven SEO\", \"560+ businesses\", \"Page 1 of Google\"\n4. Always end with free audit offer\n5. Sign as Taylor\n\nYou MUST return this EXACT JSON structure with ALL fields filled:\n\n{\n  \"cold_email\": {\n    \"subject\": \"compelling subject under 60 chars, reference signal if applicable\",\n    \"body\": \"3-4 short paragraphs, mention the buying signal, pitch AI-SEO, offer free audit, sign as Taylor\"\n  },\n  \"linkedin_connection\": \"Under 300 chars connection request. Friendly. Reference signal if applicable. Sign as Taylor.\",\n  \"linkedin_followup\": \"2-3 sentences after connection. Reference organic traffic angle. Offer free audit. Sign as Taylor.\",\n  \"call_opener\": \"First 30 seconds of cold call. Introduce as Taylor from AI-SEO. Reference signal. Ask permission to continue.\",\n  \"voicemail_script\": \"Under 20 seconds. Name, company, value prop, callback ask. Sign as Taylor.\"\n}\n\nALL 5 fields MUST be filled. Do not leave any empty. Return ONLY the JSON, no other text.`\n    }\n  ],\n  temperature: 0.7,\n  response_format: { type: \"json_object\" }\n}) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        3040,
+        -48
+      ],
+      "id": "799e1d11-457d-4f81-a857-fcdcc7780599",
+      "name": "Groq Outreach",
+      "retryOnFail": true,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.groq.com/openai/v1/chat/completions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer YOUR_GROQ_API_KEY_HERE"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  model: \"llama-3.3-70b-versatile\",\n  messages: [\n    {\n      role: \"user\",\n      content: `Analyze this company and detect buying signals. Return ONLY valid JSON.\n\nCOMPANY: ${$('Parse AI Response').item.json.company_name}\nINDUSTRY: ${$('Parse AI Response').item.json.industry}\nBUSINESS MODEL: ${$('Parse AI Response').item.json.business_model}\nPRODUCTS: ${$('Parse AI Response').item.json.products.join(', ')}\nPAIN POINTS: ${$('Parse AI Response').item.json.pain_points.join(', ')}\n\nTAVILY RESEARCH:\n${JSON.stringify($('Tavily Research').item.json).substring(0, 2000)}\n\nDetect signals in these categories: FUNDING, HIRING, GROWTH, PRODUCT, LEADERSHIP, TECHNOLOGY, PARTNERSHIP, AWARDS, CHALLENGES, NEWS.\n\nRate SALES READINESS: HOT / WARM / COLD.\n\nReturn ONLY valid JSON:\n{\n  \"sales_readiness\": \"HOT/WARM/COLD\",\n  \"readiness_score\": 0-100,\n  \"readiness_reasoning\": \"one sentence\",\n  \"signals\": [\n    {\n      \"type\": \"FUNDING/HIRING/etc\",\n      \"detail\": \"specific fact\",\n      \"why_it_matters\": \"one sentence\",\n      \"conversation_starter\": \"opening line\"\n    }\n  ],\n  \"priority_signal\": \"top signal type\",\n  \"recommended_timing\": \"immediate/this_week/this_month\",\n  \"no_signal_fallback\": \"generic hook\"\n}`\n    }\n  ],\n  temperature: 0.7,\n  response_format: { type: \"json_object\" }\n}) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2368,
+        -48
+      ],
+      "id": "12027fd5-9f93-4ebc-b177-9d674b4d3948",
+      "name": "Groq Signals",
+      "retryOnFail": true,
+      "waitBetweenTries": 5000
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Clean URL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Cache": {
+      "main": [
+        [
+          {
+            "node": "Cache Found?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cache Found?": {
+      "main": [
+        [
+          {
+            "node": "Return Cached",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Fetch Homepage",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tavily Research": {
+      "main": [
+        [
+          {
+            "node": "Prepare Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Clean URL": {
+      "main": [
+        [
+          {
+            "node": "Check Cache",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Prompt": {
+      "main": [
+        [
+          {
+            "node": "Gemini Analysis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini Analysis": {
+      "main": [
+        [
+          {
+            "node": "Parse AI Response",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Groq Analysis (Backup)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse AI Response": {
+      "main": [
+        [
+          {
+            "node": "Detect Signals",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save to Database": {
+      "main": [
+        [
+          {
+            "node": "Create Notion Page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Notion Page": {
+      "main": [
+        [
+          {
+            "node": "Send Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Outreach": {
+      "main": [
+        [
+          {
+            "node": "Parse Outreach",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Groq Outreach",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Outreach": {
+      "main": [
+        [
+          {
+            "node": "Save to Database",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Response": {
+      "main": [
+        []
+      ]
+    },
+    "Return Cached": {
+      "main": [
+        []
+      ]
+    },
+    "Fetch Homepage": {
+      "main": [
+        [
+          {
+            "node": "Extract Website Text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Website Text": {
+      "main": [
+        [
+          {
+            "node": "Tavily Research",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Detect Signals": {
+      "main": [
+        [
+          {
+            "node": "Parse Signals",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Groq Signals",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Signals": {
+      "main": [
+        [
+          {
+            "node": "Generate Outreach",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Groq Analysis (Backup)": {
+      "main": [
+        [
+          {
+            "node": "Parse AI Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Groq Outreach": {
+      "main": [
+        [
+          {
+            "node": "Parse Outreach",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Groq Signals": {
+      "main": [
+        [
+          {
+            "node": "Parse Signals",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false,
+    "timeSavedMode": "fixed",
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "versionId": "42fbb528-4d4d-4721-91e2-ae644275e5f6",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "4a28000cb5ce9a4a10bc436f5e83f9914ea21edec9648ec607630a7f0abc691b"
+  },
+  "nodeGroups": [],
+  "id": "MTNgC2YMIL9yweNF",
+  "tags": []
+}

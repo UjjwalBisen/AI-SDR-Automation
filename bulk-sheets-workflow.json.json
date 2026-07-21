@@ -1,0 +1,430 @@
+{
+  "name": "SDR Bulk from Sheets",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        0,
+        224
+      ],
+      "id": "51899f41-dab1-42d2-afba-59dc60bd5fc0",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_ID_HERE",
+          "mode": "list",
+          "cachedResultName": "SDR Leads",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/YOUR_GOOGLE_SHEET_ID_HERE/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Sheet1",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/YOUR_GOOGLE_SHEET_ID_HERE/edit#gid=0"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "Status",
+              "lookupValue": "Pending"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        224,
+        224
+      ],
+      "id": "2e475137-4ecc-4301-bbf2-f52db34da20f",
+      "name": "Read Pending Leads",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "YOUR_GOOGLE_SHEETS_CREDENTIAL_ID",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:5678/webhook/research",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  website: $json.Website\n}) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        448,
+        224
+      ],
+      "id": "4df27d93-7415-4155-ba76-388216c8d968",
+      "name": "Call SDR Research",
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_ID_HERE",
+          "mode": "list",
+          "cachedResultName": "SDR Leads",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/YOUR_GOOGLE_SHEET_ID_HERE/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Sheet1",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/YOUR_GOOGLE_SHEET_ID_HERE/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Website": "={{ $('Read Pending Leads').item.json.Website }}",
+            "Status": "=Done",
+            "Company": "={{ $('Call SDR Research').item.json.company.name }}",
+            "Industry": "={{ $('Call SDR Research').item.json.company.industry }}",
+            "Persona": "={{ $('Call SDR Research').item.json.company.recommended_persona }}",
+            "Pain Points": "={{ $('Call SDR Research').item.json.company.pain_points.join(' | ') }}",
+            "Cold Email Subject": "={{ $('Call SDR Research').item.json.outreach.cold_email.subject }}",
+            "Cold Email Body": "={{ $('Call SDR Research').item.json.outreach.cold_email.body }}",
+            "LinkedIn Message": "={{ $('Call SDR Research').item.json.outreach.linkedin_connection }}",
+            "LinkedIn Followup": "={{ $('Call SDR Research').item.json.outreach.linkedin_followup }}",
+            "Call Opener": "={{ $('Call SDR Research').item.json.outreach.call_opener }}",
+            "Confidence": "={{ $('Call SDR Research').item.json.company.confidence_score }}",
+            "Processed At": "={{ $now.toISO() }}",
+            "Sales Readiness": "={{ $('Call SDR Research').item.json.buying_signals ? $('Call SDR Research').item.json.buying_signals.sales_readiness : 'UNKNOWN' }}",
+            "Priority Signal": "={{ $json.buying_signals ? $json.buying_signals.priority_signal : '' }}",
+            "Signal Detail": "={{ $('Call SDR Research').item.json.buying_signals && $('Call SDR Research').item.json.buying_signals.signals && $('Call SDR Research').item.json.buying_signals.signals[0] ? $('Call SDR Research').item.json.buying_signals.signals[0].detail : ($('Call SDR Research').item.json.buying_signals ? $('Call SDR Research').item.json.buying_signals.no_signal_fallback : '') }}",
+            "Email Sent": "={{ $('Send Cold Email').item.json.accepted && $('Send Cold Email').item.json.accepted.length > 0 ? 'Yes' : 'Failed' }}",
+            "Sent At": "={{ $now.toISO() }}",
+            "Prospect Email": "={{ $('Read Pending Leads').item.json['Prospect Email'] }}"
+          },
+          "matchingColumns": [
+            "Website"
+          ],
+          "schema": [
+            {
+              "id": "Website",
+              "displayName": "Website",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Status",
+              "displayName": "Status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Company",
+              "displayName": "Company",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Industry",
+              "displayName": "Industry",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Persona",
+              "displayName": "Persona",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Pain Points",
+              "displayName": "Pain Points",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Cold Email Subject",
+              "displayName": "Cold Email Subject",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Cold Email Body",
+              "displayName": "Cold Email Body",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "LinkedIn Message",
+              "displayName": "LinkedIn Message",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "LinkedIn Followup",
+              "displayName": "LinkedIn Followup",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Call Opener",
+              "displayName": "Call Opener",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Confidence",
+              "displayName": "Confidence",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Processed At",
+              "displayName": "Processed At",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Sales Readiness",
+              "displayName": "Sales Readiness",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Priority Signal",
+              "displayName": "Priority Signal",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Signal Detail",
+              "displayName": "Signal Detail",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Prospect Email",
+              "displayName": "Prospect Email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Email Sent",
+              "displayName": "Email Sent",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Sent At",
+              "displayName": "Sent At",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "row_number",
+              "displayName": "row_number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "readOnly": true,
+              "removed": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        896,
+        224
+      ],
+      "id": "b2dccd6a-5535-4eaf-aaa2-8cbb8cb685ff",
+      "name": "Write Results Back",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "YOUR_GOOGLE_SHEETS_CREDENTIAL_ID",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{ $('Read Pending Leads').item.json['Prospect Email'] }}",
+        "toEmail": "Prospect_Email",
+        "subject": "={{ $json.outreach.cold_email.subject }}",
+        "html": "={{ $json.outreach.cold_email.body }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        672,
+        224
+      ],
+      "id": "a27a3882-cf6c-4457-9633-c8872f6c50dd",
+      "name": "Send Cold Email",
+      "webhookId": "d5f5fc55-8fc5-438d-90f9-27c5795d6e06",
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "smtp": {
+          "id": "YOUR_SMTP_CREDENTIAL_ID",
+          "name": "SMTP account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Read Pending Leads",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Pending Leads": {
+      "main": [
+        [
+          {
+            "node": "Call SDR Research",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call SDR Research": {
+      "main": [
+        [
+          {
+            "node": "Send Cold Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Cold Email": {
+      "main": [
+        [
+          {
+            "node": "Write Results Back",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "84410a9f-2ace-44d1-851b-86440d349c4c",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "4a28000cb5ce9a4a10bc436f5e83f9914ea21edec9648ec607630a7f0abc691b"
+  },
+  "nodeGroups": [],
+  "id": "mwwnUFtkagf9PyxN",
+  "tags": []
+}

@@ -237,3 +237,7 @@ GTM Engineer | AI Automation Specialist
 
 🔗 GitHub
 📧 Contact for freelance / consulting
+
+If this project helped you or inspired you, please star it so others can find it too!
+
+Questions? Suggestions? Open an issue or reach out.
